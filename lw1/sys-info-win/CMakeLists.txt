@@ -1,0 +1,1 @@
+add_executable(sys-info-win main.cpp)

@@ -241,3 +241,4 @@ samples/01-basics/string-joiner/out.txt
 
 /cmake-build-debug
 /build
+/out
