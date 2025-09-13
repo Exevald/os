@@ -19,7 +19,7 @@ public:
 	FileDesc(FileDesc&& other) noexcept;
 	FileDesc& operator=(FileDesc&& other) noexcept;
 
-	bool IsOpen() const;
+	[[nodiscard]] bool IsOpen() const;
 	void Open(const char* pathname, int flags);
 	void Close();
 
