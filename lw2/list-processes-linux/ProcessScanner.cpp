@@ -12,164 +12,18 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-std::vector<pid_t> ProcessScanner::ScanProcForPids()
+namespace
 {
-	std::vector<pid_t> pids;
-	DIR* dir = opendir("/proc");
-	if (!dir)
-	{
-		std::cerr << "Failed to open /proc" << std::endl;
-		return pids;
-	}
-
-	dirent* entry;
-	while ((entry = readdir(dir)) != nullptr)
-	{
-		if (entry->d_type == DT_DIR)
-		{
-			try
-			{
-				pid_t pid = std::stoul(entry->d_name);
-				pids.push_back(pid);
-			}
-			catch (...)
-			{
-			}
-		}
-	}
-	closedir(dir);
-	return pids;
-}
-
-ProcessInfo ProcessScanner::CollectProcessInfo(pid_t pid)
-{
-	ProcessInfo info;
-	info.pid = pid;
-
-	if (const std::string exeBasename = GetExeBasename(pid); exeBasename.empty())
-	{
-		const std::string commPath = "/proc/" + std::to_string(pid) + "/comm";
-		info.comm = ReadComm(commPath);
-		if (info.comm.empty())
-		{
-			info.comm = "[unknown]";
-		}
-	}
-	else
-	{
-		info.comm = exeBasename;
-	}
-
-	const std::string statusPath = "/proc/" + std::to_string(pid) + "/status";
-	if (uid_t uid; ReadUidFromStatus(statusPath, uid))
-	{
-		info.user = GetUserName(uid);
-	}
-	else
-	{
-		info.user = "unknown";
-	}
-
-	if (const std::string smapsPath = "/proc/" + std::to_string(pid) + "/smaps_rollup"; !TryReadSmapsRollup(smapsPath, info.privateMem, info.sharedMem))
-	{
-		if (!TryReadStatusFallback(statusPath, info.privateMem, info.sharedMem))
-		{
-			info.privateMem = 0;
-			info.sharedMem = 0;
-		}
-	}
-
-	if (!ReadThreadsFromStatus(statusPath, info.threads))
-	{
-		info.threads = 0;
-	}
-
-	const std::string cmdlinePath = "/proc/" + std::to_string(pid) + "/cmdline";
-	info.cmdline = ReadCmdline(cmdlinePath);
-
-	return info;
-}
-
-std::vector<ProcessInfo> ProcessScanner::CollectAllProcesses()
-{
-	const std::vector<pid_t> pids = ScanProcForPids();
-	std::vector<ProcessInfo> processes;
-	processes.reserve(pids.size());
-
-	for (const pid_t pid : pids)
-	{
-		processes.push_back(CollectProcessInfo(pid));
-	}
-	return processes;
-}
-
-void ProcessScanner::PrintProcessTable(const std::vector<ProcessInfo>& processes)
-{
-	std::cout << std::left
-			  << std::setw(8) << "PID"
-			  << std::setw(20) << "COMM"
-			  << std::setw(15) << "USER"
-			  << std::setw(12) << "PRIVATE"
-			  << std::setw(12) << "SHARED"
-			  << std::setw(8) << "%CPU"
-			  << std::setw(8) << "#THR"
-			  << "CMD" << std::endl;
-
-	std::cout << std::string(90, '-') << std::endl;
-
-	for (const auto& proc : processes)
-	{
-		std::cout << std::setw(8) << proc.pid
-				  << std::setw(20) << proc.comm
-				  << std::setw(15) << proc.user
-				  << std::setw(12) << FormatSize(proc.privateMem)
-				  << std::setw(12) << FormatSize(proc.sharedMem)
-				  << std::setw(8) << std::fixed << std::setprecision(1) << proc.cpuPercent
-				  << std::setw(8) << proc.threads
-				  << proc.cmdline << std::endl;
-	}
-}
-
-void ProcessScanner::PrintSummary(const std::vector<ProcessInfo>& processes)
-{
-	unsigned long long totalPrivate = 0, totalShared = 0;
-	const std::size_t totalCount = processes.size();
-
-	for (const auto& proc : processes)
-	{
-		totalPrivate += proc.privateMem;
-		totalShared += proc.sharedMem;
-	}
-
-	std::cout << std::string(90, '=') << std::endl;
-	std::cout << "Всего процессов: " << totalCount << std::endl;
-	std::cout << "Суммарная PRIVATE: " << FormatSize(totalPrivate) << std::endl;
-	std::cout << "Суммарная SHARED: " << FormatSize(totalShared) << std::endl;
-	std::cout << "Суммарная TOTAL: " << FormatSize(totalPrivate + totalShared) << std::endl;
-}
-
-std::string ProcessScanner::FormatSize(unsigned long long sizeKib)
-{
-	if (sizeKib < 1024)
-	{
-		return std::to_string(sizeKib) + " KiB";
-	}
-	const double mib = static_cast<double>(sizeKib) / 1024.0;
-	std::stringstream ss;
-	ss << std::fixed << std::setprecision(1) << mib << " MiB";
-	return ss.str();
-}
-
-std::string ProcessScanner::GetUserName(uid_t uid)
+std::string GetUserName(uid_t uid)
 {
 	if (const passwd* pwd = getpwuid(uid))
 	{
-		return std::string(pwd->pw_name);
+		return pwd->pw_name;
 	}
 	return "unknown";
 }
 
-std::string ProcessScanner::ReadProcFile(const std::string& path)
+std::string ReadProcFile(const std::string& path)
 {
 	std::ifstream file(path);
 	if (!file.is_open())
@@ -181,7 +35,7 @@ std::string ProcessScanner::ReadProcFile(const std::string& path)
 	return ss.str();
 }
 
-bool ProcessScanner::ReadUidFromStatus(const std::string& statusPath, uid_t& uid)
+bool ReadUidFromStatus(const std::string& statusPath, uid_t& uid)
 {
 	std::string content = ReadProcFile(statusPath);
 	if (content.empty())
@@ -206,7 +60,7 @@ bool ProcessScanner::ReadUidFromStatus(const std::string& statusPath, uid_t& uid
 	return false;
 }
 
-bool ProcessScanner::ReadThreadsFromStatus(const std::string& statusPath, int& threads)
+bool ReadThreadsFromStatus(const std::string& statusPath, int& threads)
 {
 	std::string content = ReadProcFile(statusPath);
 	if (content.empty())
@@ -230,7 +84,7 @@ bool ProcessScanner::ReadThreadsFromStatus(const std::string& statusPath, int& t
 	return false;
 }
 
-std::string ProcessScanner::ReadComm(const std::string& commPath)
+std::string ReadComm(const std::string& commPath)
 {
 	if (std::string content = ReadProcFile(commPath); !content.empty())
 	{
@@ -243,7 +97,7 @@ std::string ProcessScanner::ReadComm(const std::string& commPath)
 	return "";
 }
 
-std::string ProcessScanner::ReadCmdline(const std::string& cmdlinePath)
+std::string ReadCmdline(const std::string& cmdlinePath)
 {
 	std::ifstream file(cmdlinePath, std::ios::binary);
 	if (!file.is_open())
@@ -271,7 +125,7 @@ std::string ProcessScanner::ReadCmdline(const std::string& cmdlinePath)
 	return result.empty() ? "[no cmdline]" : result;
 }
 
-bool ProcessScanner::TryReadSmapsRollup(const std::string& smapsPath, unsigned long long& privateMem, unsigned long long& sharedMem)
+bool TryReadSmapsRollup(const std::string& smapsPath, unsigned long long& privateMemoryUsage, unsigned long long& sharedMemoryUsage)
 {
 	const std::string content = ReadProcFile(smapsPath);
 	if (content.empty())
@@ -281,34 +135,34 @@ bool ProcessScanner::TryReadSmapsRollup(const std::string& smapsPath, unsigned l
 
 	std::istringstream iss(content);
 	std::string line;
-	unsigned long long p_clean = 0, p_dirty = 0, s_clean = 0, s_dirty = 0;
+	unsigned long long privateClean = 0, privateDirty = 0, sharedClean = 0, sharedDirty = 0;
 
 	while (std::getline(iss, line))
 	{
 		if (line.find("Private_Clean:") == 0)
 		{
-			sscanf(line.c_str(), "Private_Clean: %llu kB", &p_clean);
+			sscanf(line.c_str(), "Private_Clean: %llu kB", &privateClean);
 		}
 		else if (line.find("Private_Dirty:") == 0)
 		{
-			sscanf(line.c_str(), "Private_Dirty: %llu kB", &p_dirty);
+			sscanf(line.c_str(), "Private_Dirty: %llu kB", &privateDirty);
 		}
 		else if (line.find("Shared_Clean:") == 0)
 		{
-			sscanf(line.c_str(), "Shared_Clean: %llu kB", &s_clean);
+			sscanf(line.c_str(), "Shared_Clean: %llu kB", &sharedClean);
 		}
 		else if (line.find("Shared_Dirty:") == 0)
 		{
-			sscanf(line.c_str(), "Shared_Dirty: %llu kB", &s_dirty);
+			sscanf(line.c_str(), "Shared_Dirty: %llu kB", &sharedDirty);
 		}
 	}
+	privateMemoryUsage = privateClean + privateDirty;
+	sharedMemoryUsage = sharedClean + sharedDirty;
 
-	privateMem = p_clean + p_dirty;
-	sharedMem = s_clean + s_dirty;
 	return true;
 }
 
-bool ProcessScanner::TryReadStatusFallback(const std::string& statusPath, unsigned long long& privateMem, unsigned long long& sharedMem)
+bool TryReadStatusFallback(const std::string& statusPath, unsigned long long& privateMem, unsigned long long& sharedMem)
 {
 	const std::string content = ReadProcFile(statusPath);
 	if (content.empty())
@@ -341,7 +195,7 @@ bool ProcessScanner::TryReadStatusFallback(const std::string& statusPath, unsign
 	return true;
 }
 
-std::string ProcessScanner::GetExeBasename(pid_t pid)
+std::string GetExeBasename(pid_t pid)
 {
 	char linkTarget[PATH_MAX];
 	const std::string exePath = "/proc/" + std::to_string(pid) + "/exe";
@@ -356,4 +210,97 @@ std::string ProcessScanner::GetExeBasename(pid_t pid)
 		return fullPath;
 	}
 	return "";
+}
+} // namespace
+
+std::vector<pid_t> ProcessScanner::GetAllProcessesIds()
+{
+	std::vector<pid_t> pids;
+	DIR* dir = opendir("/proc");
+	if (!dir)
+	{
+		std::cerr << "Failed to open /proc" << std::endl;
+		return pids;
+	}
+
+	dirent* entry;
+	while ((entry = readdir(dir)) != nullptr)
+	{
+		if (entry->d_type == DT_DIR)
+		{
+			try
+			{
+				auto pid = static_cast<pid_t>(std::stoul(entry->d_name));
+				pids.push_back(pid);
+			}
+			catch (...)
+			{
+			}
+		}
+	}
+	closedir(dir);
+	return pids;
+}
+
+ProcessInfo ProcessScanner::GetProcessInfo(pid_t pid)
+{
+	ProcessInfo info;
+	info.pid = pid;
+
+	if (const std::string exeBasename = GetExeBasename(pid); exeBasename.empty())
+	{
+		const std::string commPath = "/proc/" + std::to_string(pid) + "/comm";
+		info.processName = ReadComm(commPath);
+		if (info.processName.empty())
+		{
+			info.processName = "[unknown]";
+		}
+	}
+	else
+	{
+		info.processName = exeBasename;
+	}
+
+	const std::string statusPath = "/proc/" + std::to_string(pid) + "/status";
+	if (uid_t uid; ReadUidFromStatus(statusPath, uid))
+	{
+		info.user = GetUserName(uid);
+	}
+	else
+	{
+		info.user = "unknown";
+	}
+
+	if (const std::string smapsPath = "/proc/" + std::to_string(pid) + "/smaps_rollup";
+		!TryReadSmapsRollup(smapsPath, info.privateMemKb, info.sharedMemKb))
+	{
+		if (!TryReadStatusFallback(statusPath, info.privateMemKb, info.sharedMemKb))
+		{
+			info.privateMemKb = 0;
+			info.sharedMemKb = 0;
+		}
+	}
+
+	if (!ReadThreadsFromStatus(statusPath, info.threads))
+	{
+		info.threads = 0;
+	}
+
+	const std::string cmdlinePath = "/proc/" + std::to_string(pid) + "/cmdline";
+	info.cmdline = ReadCmdline(cmdlinePath);
+
+	return info;
+}
+
+std::vector<ProcessInfo> ProcessScanner::CollectAllProcesses()
+{
+	const std::vector<pid_t> pids = GetAllProcessesIds();
+	std::vector<ProcessInfo> processes;
+	processes.reserve(pids.size());
+
+	for (const pid_t pid : pids)
+	{
+		processes.push_back(GetProcessInfo(pid));
+	}
+	return processes;
 }
