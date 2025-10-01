@@ -1,0 +1,11 @@
+type WaitGroup struct {
+	// contains filtered or unexported fields
+}
+
+A WaitGroup is a counting semaphore typically used to wait for a group of goroutines or tasks to finish.
+
+Typically, a main goroutine will start tasks, each in a new goroutine, by calling WaitGroup.Go and then wait for all tasks to complete by calling WaitGroup.Wait. For example:
+var wg sync.WaitGroup
+wg.Go(task1)
+wg.Go(task2)
+wg.Wait()

@@ -1,0 +1,3 @@
+Hello!
+This is a BASE file.
+Numbers and symbols: 1234567890 !@#$%^&*()
