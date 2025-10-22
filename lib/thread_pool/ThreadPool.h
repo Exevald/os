@@ -16,42 +16,17 @@ public:
 
 	explicit ThreadPool(size_t numThreads)
 	{
+		m_workers.reserve(numThreads);
 		for (size_t i = 0; i < numThreads; ++i)
 		{
-			m_workers.emplace_back([this] {
-				while (true)
-				{
-					Task task;
-					{
-						std::unique_lock lock(this->m_queueMutex);
-						this->m_cv.wait(lock, [this] {
-							return this->m_stopFlag || !this->m_tasks.empty();
-						});
-						if (this->m_stopFlag && this->m_tasks.empty())
-						{
-							return;
-						}
-						task = std::move(this->m_tasks.front());
-						this->m_tasks.pop();
-					}
-					task();
-					--this->m_activeTasks;
-				}
-			});
+			m_workers.emplace_back(&ThreadPool::WorkerLoop, this);
 		}
 	}
 
 	~ThreadPool()
 	{
-		{
-			std::unique_lock lock(m_queueMutex);
-			m_stopFlag = true;
-		}
-		m_cv.notify_all();
-		for (std::thread& worker : m_workers)
-		{
-			worker.join();
-		}
+		m_stopFlag = true;
+		m_stateChanged.notify_all();
 	}
 
 	template <class F, class... Args>
@@ -76,16 +51,60 @@ public:
 			});
 			++m_activeTasks;
 		}
-		m_cv.notify_one();
-
+		m_stateChanged.notify_one();
 		return res;
 	}
 
+	void Wait()
+	{
+		std::unique_lock lock(m_queueMutex);
+		m_tasksEmpty.wait(lock, [this] {
+			return m_tasks.empty() && m_activeTasks.load(std::memory_order_acquire) == 0;
+		});
+	}
+
 private:
-	std::vector<std::thread> m_workers;
+	void WorkerLoop()
+	{
+		while (true)
+		{
+			Task task;
+			{
+				std::unique_lock lock(m_queueMutex);
+				m_stateChanged.wait(lock, [this] {
+					return m_stopFlag.load(std::memory_order_relaxed) || !m_tasks.empty();
+				});
+
+				if (m_stopFlag.load(std::memory_order_relaxed) && m_tasks.empty())
+				{
+					return;
+				}
+
+				task = std::move(m_tasks.front());
+				m_tasks.pop();
+			}
+
+			try
+			{
+				task();
+			}
+			catch (...)
+			{
+			}
+
+			m_activeTasks.fetch_sub(1, std::memory_order_release);
+			if (m_activeTasks.load(std::memory_order_acquire) == 0 && m_tasks.empty())
+			{
+				m_tasksEmpty.notify_all();
+			}
+		}
+	}
+
+	std::vector<std::jthread> m_workers;
 	std::queue<Task> m_tasks;
 	std::mutex m_queueMutex;
-	std::condition_variable m_cv;
+	std::condition_variable m_stateChanged;
+	std::condition_variable m_tasksEmpty;
 	std::atomic<bool> m_stopFlag{ false };
 	std::atomic<size_t> m_activeTasks{ 0 };
 };
