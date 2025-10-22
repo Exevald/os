@@ -1,4 +1,6 @@
 #include "ImageProcessor.h"
+
+#include "StbiGuard.h"
 #include "stb_image.h"
 
 #include <cmath>
@@ -18,18 +20,20 @@ float FromLinear(float linear)
 
 ImageProcessor::ImageRGB ImageProcessor::LoadImageAsRGB(const std::string& path)
 {
+	constexpr int desiredChannels = 3;
 	int w, h, channels;
-	unsigned char* pixels = stbi_load(path.c_str(), &w, &h, &channels, 3);
+
+	unsigned char* pixels = stbi_load(path.c_str(), &w, &h, &channels, desiredChannels);
 	if (!pixels)
 	{
 		throw std::runtime_error("Failed to load image: " + path);
 	}
+	StbiGuard guard(pixels);
 
 	ImageRGB img;
 	img.width = w;
 	img.height = h;
-	img.data.assign(pixels, pixels + w * h * 3);
-	stbi_image_free(pixels);
+	img.data.assign(pixels, pixels + w * h * desiredChannels);
 
 	return img;
 }
