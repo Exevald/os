@@ -1,2 +1,3 @@
 add_subdirectory(stb_image)
 add_subdirectory(thread_pool)
+add_subdirectory(benchmark)

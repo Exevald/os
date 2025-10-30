@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 enable_testing()
 
+find_package(GTest REQUIRED)
+
 add_subdirectory(lib)
 add_subdirectory(lw1)
 add_subdirectory(lw2)

@@ -46,7 +46,7 @@ public:
 				throw std::runtime_error("enqueue on stopped ThreadPool");
 			}
 
-			m_tasks.emplace([task] {
+			m_tasks.emplace([task = std::move(task)] {
 				(*task)();
 			});
 			++m_activeTasks;
@@ -59,7 +59,8 @@ public:
 	{
 		std::unique_lock lock(m_queueMutex);
 		m_tasksEmpty.wait(lock, [this] {
-			return m_tasks.empty() && m_activeTasks.load(std::memory_order_acquire) == 0;
+			// TODO: написать комментарий, почему тут memory_order_relaxed
+			return m_tasks.empty() && m_activeTasks.load(std::memory_order_relaxed) == 0;
 		});
 	}
 
