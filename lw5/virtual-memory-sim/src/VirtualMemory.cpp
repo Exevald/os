@@ -107,6 +107,7 @@ uint32_t VirtualMemory::TranslateAndCheck(uint32_t virtualAddress, Access access
 
     const uint32_t frameNumber = pte.GetFrame();
     const uint32_t physicalAddress = (frameNumber << VADDR_PAGENUM_SHIFT) | offset;
+	m_osHandler.OnSuccessfulAccess(virtualPageNumber, access);
 
     return physicalAddress;
 }

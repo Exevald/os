@@ -31,6 +31,7 @@ class OSHandler
 public:
 	virtual ~OSHandler() = default;
 	virtual bool OnPageFault(VirtualMemory& vm, uint32_t virtualPageNumber, Access access, PageFaultReason reason) = 0;
+	virtual void OnSuccessfulAccess(uint32_t virtualPageNumber, Access access) = 0;
 };
 
 /*

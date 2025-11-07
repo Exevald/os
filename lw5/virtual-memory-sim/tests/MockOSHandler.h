@@ -35,4 +35,9 @@ public:
 		calls.clear();
 		SetReturn(false);
 	}
+
+	void OnSuccessfulAccess(uint32_t virtualPageNumber, Access access) override
+	{
+
+	}
 };
