@@ -1,10 +1,11 @@
 #include "SwapManager.h"
 
 #include <fstream>
+#include <utility>
 
-SwapManager::SwapManager(VMSupervisorContext& vmContext, const std::filesystem::path& path)
+SwapManager::SwapManager(VMSupervisorContext& vmContext, std::filesystem::path  path)
 	: m_vmContext(vmContext)
-	, m_path(path)
+	, m_path(std::move(path))
 {
 }
 

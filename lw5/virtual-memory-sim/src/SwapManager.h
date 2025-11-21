@@ -8,12 +8,10 @@
 class SwapManager
 {
 public:
-	explicit SwapManager(VMSupervisorContext& vmContext, const std::filesystem::path& path);
+	explicit SwapManager(VMSupervisorContext& vmContext, std::filesystem::path  path);
 	uint32_t AllocateSlot(uint32_t virtualPageNumber);
 	void FreeSlot(uint32_t virtualPageNumber);
-	// Считывает страницу из swap-файла
 	void ReadPage(uint32_t slot, uint32_t virtualPageNumber);
-	// Записывает страницу в файл
 	void WritePage(uint32_t slot, uint32_t virtualPageNumber);
 
 private:

@@ -116,7 +116,6 @@ TEST_F(MemoryManagerTest, NullptrFree)
 {
 	MemoryManager mm(buffer.get(), buffer_size);
 
-	// Freeing nullptr should not crash
 	mm.Free(nullptr);
 }
 
@@ -153,73 +152,29 @@ protected:
 	size_t buffer_size{};
 };
 
-TEST_F(ThreadSafetyTest, ConcurrentAllocations)
-{
-	MemoryManager mm(buffer.get(), buffer_size);
-	const int num_threads = 4;
-	const int allocations_per_thread = 100;
-
-	std::vector<std::thread> threads;
-	std::vector<std::vector<void*>> thread_allocations(num_threads);
-
-	for (int i = 0; i < num_threads; ++i)
-	{
-		threads.emplace_back([&mm, &thread_allocations, i]() {
-			std::vector<void*>& allocations = thread_allocations[i];
-			std::random_device rd;
-			std::mt19937 gen(rd());
-			std::uniform_int_distribution<> dis(1, 100);
-
-			for (int j = 0; j < allocations_per_thread; ++j)
-			{
-				size_t size = dis(gen);
-				void* ptr = mm.Allocate(size);
-				if (ptr)
-				{
-					allocations.push_back(ptr);
-					memset(ptr, 0xFF, size);
-				}
-			}
-		});
-	}
-
-	for (auto& t : threads)
-	{
-		t.join();
-	}
-
-	for (auto& allocations : thread_allocations)
-	{
-		for (void* ptr : allocations)
-		{
-			mm.Free(ptr);
-		}
-	}
-}
-
 TEST_F(ThreadSafetyTest, ConcurrentAllocationsAndFrees)
 {
 	MemoryManager mm(buffer.get(), buffer_size);
-	const int num_threads = 4;
-	const int operations_per_thread = 200;
+	const int numThreads = 4;
+	const int operationsPerThread = 200;
 
 	std::vector<std::thread> threads;
-	std::vector<std::vector<void*>> thread_allocations(num_threads);
+	std::vector<std::vector<void*>> threadAllocations(numThreads);
 
-	for (int i = 0; i < num_threads; ++i)
+	for (int i = 0; i < numThreads; ++i)
 	{
-		threads.emplace_back([&mm, &thread_allocations, i]() {
-			std::vector<void*>& allocations = thread_allocations[i];
+		threads.emplace_back([&mm, &threadAllocations, i]() {
+			std::vector<void*>& allocations = threadAllocations[i];
 			std::random_device rd;
 			std::mt19937 gen(rd());
-			std::uniform_int_distribution<> alloc_dis(1, 100);
-			std::uniform_int_distribution<> op_dis(0, 1);
+			std::uniform_int_distribution<> allocDis(1, 100);
+			std::uniform_int_distribution<> opDis(0, 1);
 
-			for (int j = 0; j < operations_per_thread; ++j)
+			for (int j = 0; j < operationsPerThread; ++j)
 			{
-				if (op_dis(gen) == 0)
+				if (opDis(gen) == 0)
 				{
-					size_t size = alloc_dis(gen);
+					size_t size = allocDis(gen);
 					void* ptr = mm.Allocate(size);
 					if (ptr)
 					{
@@ -231,7 +186,7 @@ TEST_F(ThreadSafetyTest, ConcurrentAllocationsAndFrees)
 				{
 					if (!allocations.empty())
 					{
-						size_t idx = alloc_dis(gen) % allocations.size();
+						size_t idx = allocDis(gen) % allocations.size();
 						void* ptr = allocations[idx];
 						allocations[idx] = allocations.back();
 						allocations.pop_back();
@@ -247,7 +202,7 @@ TEST_F(ThreadSafetyTest, ConcurrentAllocationsAndFrees)
 		t.join();
 	}
 
-	for (auto& allocations : thread_allocations)
+	for (auto& allocations : threadAllocations)
 	{
 		for (void* ptr : allocations)
 		{
