@@ -1,26 +1,26 @@
 #pragma once
 
 #include <cassert>
-#include <list>
-#include <memory>
+#include <cstddef>
 #include <shared_mutex>
-#include <utility>
-
-struct MemoryBlock
-{
-	size_t size;
-	uintptr_t startAddress;
-
-	explicit MemoryBlock(uintptr_t start, size_t size)
-		: startAddress(start)
-		, size(size)
-	{
-	}
-};
 
 class MemoryManager
 {
 public:
+	struct BlockHeader
+	{
+		BlockHeader* prev;
+		BlockHeader* next;
+		size_t size;
+
+		static constexpr size_t FLAG_FREE = 1;
+
+		[[nodiscard]] size_t GetSize() const;
+		[[nodiscard]] bool IsFree() const;
+		void SetSize(size_t newSize, bool isFree);
+		static BlockHeader* GetHeaderFromDataPtr(void* dataPtr);
+	};
+
 	explicit MemoryManager(void* start, size_t size) noexcept;
 
 	MemoryManager(const MemoryManager&) = delete;
@@ -30,8 +30,12 @@ public:
 	void Free(void* address) noexcept;
 
 private:
+	void RemoveFromFreeList(BlockHeader* block);
+	void AddToFreeList(BlockHeader* block);
+	void Coalesce(BlockHeader* block);
+
 	std::shared_mutex m_managerMutex;
 	void* m_memoryStartAddress;
 	size_t m_size;
-	std::list<MemoryBlock> m_data;
+	BlockHeader* m_freeBlocks;
 };

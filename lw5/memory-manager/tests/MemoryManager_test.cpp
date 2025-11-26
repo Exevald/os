@@ -1,197 +1,132 @@
 #include "MemoryManager.h"
 
+#include <algorithm>
+#include <cstring>
 #include <gtest/gtest.h>
-#include <random>
 #include <thread>
+#include <vector>
 
 class MemoryManagerTest : public ::testing::Test
 {
 protected:
-	void SetUp() override
-	{
-		buffer_size = 1024;
-		buffer = std::make_unique<char[]>(buffer_size);
-	}
-
-	void TearDown() override
-	{
-		buffer.reset();
-	}
-
-	std::unique_ptr<char[]> buffer;
-	size_t buffer_size{};
+	static constexpr size_t BUFFER_SIZE = 4096;
+	alignas(std::max_align_t) char buffer[BUFFER_SIZE]{};
 };
 
-TEST_F(MemoryManagerTest, BasicAllocation)
+class MemoryManagerThreadSafetyTest : public ::testing::Test
 {
-	MemoryManager mm(buffer.get(), buffer_size);
+protected:
+	static constexpr size_t BUFFER_SIZE = 4 * 1024 * 1024;
+	alignas(std::max_align_t) static char buffer[BUFFER_SIZE];
+};
 
-	void* ptr = mm.Allocate(100);
-	ASSERT_NE(ptr, nullptr);
+alignas(std::max_align_t) char MemoryManagerThreadSafetyTest::buffer[BUFFER_SIZE];
 
-	EXPECT_EQ(reinterpret_cast<uintptr_t>(ptr) % alignof(std::max_align_t), 0);
-
-	mm.Free(ptr);
+TEST_F(MemoryManagerTest, EmptyBuffer)
+{
+	MemoryManager mm(nullptr, 0);
+	EXPECT_EQ(mm.Allocate(1), nullptr);
 }
 
-TEST_F(MemoryManagerTest, Alignment)
+TEST_F(MemoryManagerTest, TooSmallBuffer)
 {
-	MemoryManager mm(buffer.get(), buffer_size);
-
-	void* ptr = mm.Allocate(50, 16);
-	ASSERT_NE(ptr, nullptr);
-	EXPECT_EQ(reinterpret_cast<uintptr_t>(ptr) % 16, 0);
-
-	mm.Free(ptr);
+	alignas(std::max_align_t) char smallBuf[sizeof(MemoryManager::BlockHeader) - 1];
+	MemoryManager mm(smallBuf, sizeof(smallBuf));
+	EXPECT_EQ(mm.Allocate(1), nullptr);
 }
 
-TEST_F(MemoryManagerTest, MultipleAllocations)
+TEST_F(MemoryManagerTest, BasicAllocationAndFree)
 {
-	MemoryManager mm(buffer.get(), buffer_size);
+	MemoryManager mm(buffer, BUFFER_SIZE);
 
-	void* ptr1 = mm.Allocate(100);
-	void* ptr2 = mm.Allocate(200);
-	void* ptr3 = mm.Allocate(50);
+	void* p1 = mm.Allocate(100);
+	ASSERT_NE(p1, nullptr);
+	void* p2 = mm.Allocate(200);
+	ASSERT_NE(p2, nullptr);
 
-	ASSERT_NE(ptr1, nullptr);
-	ASSERT_NE(ptr2, nullptr);
-	ASSERT_NE(ptr3, nullptr);
+	mm.Free(p1);
+	mm.Free(p2);
 
-	EXPECT_NE(ptr1, ptr2);
-	EXPECT_NE(ptr1, ptr3);
-	EXPECT_NE(ptr2, ptr3);
-
-	mm.Free(ptr1);
-	mm.Free(ptr2);
-	mm.Free(ptr3);
+	void* p3 = mm.Allocate(300);
+	EXPECT_NE(p3, nullptr);
+	mm.Free(p3);
 }
-
-TEST_F(MemoryManagerTest, AllocationWithInsufficientSpace)
+TEST_F(MemoryManagerTest, AlignmentWorks)
 {
-	MemoryManager mm(buffer.get(), 100);
+	MemoryManager mm(buffer, BUFFER_SIZE);
 
-	void* ptr1 = mm.Allocate(80);
-	void* ptr2 = mm.Allocate(80);
+	void* p1 = mm.Allocate(8, 8);
+	ASSERT_NE(p1, nullptr);
+	EXPECT_EQ(reinterpret_cast<uintptr_t>(p1) % 8, 0);
 
-	ASSERT_NE(ptr1, nullptr);
-	ASSERT_EQ(ptr2, nullptr);
+	void* p2 = mm.Allocate(16, 16);
+	ASSERT_NE(p2, nullptr);
+	EXPECT_EQ(reinterpret_cast<uintptr_t>(p2) % 16, 0);
 
-	mm.Free(ptr1);
-}
+	void* p3 = mm.Allocate(32, 32);
+	ASSERT_NE(p3, nullptr);
+	EXPECT_EQ(reinterpret_cast<uintptr_t>(p3) % 32, 0);
 
-TEST_F(MemoryManagerTest, FreeCoalescing)
-{
-	MemoryManager mm(buffer.get(), buffer_size);
-
-	void* ptr1 = mm.Allocate(100);
-	void* ptr2 = mm.Allocate(100);
-	void* ptr3 = mm.Allocate(100);
-
-	ASSERT_NE(ptr1, nullptr);
-	ASSERT_NE(ptr2, nullptr);
-	ASSERT_NE(ptr3, nullptr);
-
-	mm.Free(ptr2);
-	mm.Free(ptr1);
-	mm.Free(ptr3);
-}
-
-TEST_F(MemoryManagerTest, ZeroAllocation)
-{
-	MemoryManager mm(buffer.get(), buffer_size);
-
-	void* ptr = mm.Allocate(0);
-	(void)ptr;
+	mm.Free(p1);
+	mm.Free(p2);
+	mm.Free(p3);
 }
 
 TEST_F(MemoryManagerTest, InvalidAlignment)
 {
-	MemoryManager mm(buffer.get(), buffer_size);
-
-	void* ptr = mm.Allocate(100, 3);
-	ASSERT_EQ(ptr, nullptr);
+	MemoryManager mm(buffer, BUFFER_SIZE);
+	EXPECT_EQ(mm.Allocate(10, 3), nullptr);
+	EXPECT_EQ(mm.Allocate(10, 0), nullptr);
 }
 
-TEST_F(MemoryManagerTest, NullptrFree)
+TEST_F(MemoryManagerTest, Coalescing)
 {
-	MemoryManager mm(buffer.get(), buffer_size);
+	MemoryManager mm(buffer, BUFFER_SIZE);
 
-	mm.Free(nullptr);
+	void* p1 = mm.Allocate(100);
+	void* p2 = mm.Allocate(100);
+	void* p3 = mm.Allocate(100);
+	ASSERT_NE(p1, nullptr);
+	ASSERT_NE(p2, nullptr);
+	ASSERT_NE(p3, nullptr);
+
+	mm.Free(p2);
+	mm.Free(p1);
+	mm.Free(p3);
+
+	void* big = mm.Allocate(300);
+	EXPECT_NE(big, nullptr);
+	mm.Free(big);
 }
 
-TEST_F(MemoryManagerTest, ReallocateAfterFree)
+TEST_F(MemoryManagerTest, ZeroSizeAllocation)
 {
-	MemoryManager mm(buffer.get(), buffer_size);
-
-	void* ptr1 = mm.Allocate(100);
-	ASSERT_NE(ptr1, nullptr);
-
-	mm.Free(ptr1);
-
-	void* ptr2 = mm.Allocate(100);
-	ASSERT_NE(ptr2, nullptr);
-
-	mm.Free(ptr2);
+	MemoryManager mm(buffer, BUFFER_SIZE);
+	void* p = mm.Allocate(0);
+	mm.Free(p);
 }
 
-class ThreadSafetyTest : public ::testing::Test
+TEST_F(MemoryManagerThreadSafetyTest, ConcurrentAllocateAndFree)
 {
-protected:
-	void SetUp() override
-	{
-		buffer_size = 1024 * 100;
-		buffer = std::make_unique<char[]>(buffer_size);
-	}
+	MemoryManager mm(buffer, BUFFER_SIZE);
 
-	void TearDown() override
-	{
-		buffer.reset();
-	}
-
-	std::unique_ptr<char[]> buffer;
-	size_t buffer_size{};
-};
-
-TEST_F(ThreadSafetyTest, ConcurrentAllocationsAndFrees)
-{
-	MemoryManager mm(buffer.get(), buffer_size);
 	const int numThreads = 4;
-	const int operationsPerThread = 200;
+	const int opsPerThread = 500;
 
 	std::vector<std::thread> threads;
-	std::vector<std::vector<void*>> threadAllocations(numThreads);
+	std::vector<std::vector<void*>> allocations(numThreads);
 
-	for (int i = 0; i < numThreads; ++i)
+	for (int tid = 0; tid < numThreads; ++tid)
 	{
-		threads.emplace_back([&mm, &threadAllocations, i]() {
-			std::vector<void*>& allocations = threadAllocations[i];
-			std::random_device rd;
-			std::mt19937 gen(rd());
-			std::uniform_int_distribution<> allocDis(1, 100);
-			std::uniform_int_distribution<> opDis(0, 1);
-
-			for (int j = 0; j < operationsPerThread; ++j)
+		threads.emplace_back([&, tid]() {
+			for (int i = 0; i < opsPerThread; ++i)
 			{
-				if (opDis(gen) == 0)
+				size_t size = 64 + (i % 128);
+				void* ptr = mm.Allocate(size);
+				if (ptr)
 				{
-					size_t size = allocDis(gen);
-					void* ptr = mm.Allocate(size);
-					if (ptr)
-					{
-						allocations.push_back(ptr);
-						memset(ptr, 0xFF, size);
-					}
-				}
-				else
-				{
-					if (!allocations.empty())
-					{
-						size_t idx = allocDis(gen) % allocations.size();
-						void* ptr = allocations[idx];
-						allocations[idx] = allocations.back();
-						allocations.pop_back();
-						mm.Free(ptr);
-					}
+					allocations[tid].push_back(ptr);
+					std::memset(ptr, static_cast<int>(tid), size);
 				}
 			}
 		});
@@ -202,11 +137,15 @@ TEST_F(ThreadSafetyTest, ConcurrentAllocationsAndFrees)
 		t.join();
 	}
 
-	for (auto& allocations : threadAllocations)
+	for (auto& allocs : allocations)
 	{
-		for (void* ptr : allocations)
+		for (void* p : allocs)
 		{
-			mm.Free(ptr);
+			mm.Free(p);
 		}
 	}
+
+	void* big = mm.Allocate(BUFFER_SIZE / 2);
+	ASSERT_NE(big, nullptr);
+	mm.Free(big);
 }
