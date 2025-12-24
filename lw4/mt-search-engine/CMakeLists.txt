@@ -6,4 +6,4 @@ add_executable(
         main.cpp
 )
 
-target_link_libraries(mt-search-engine PRIVATE thead_pool_lib)
+target_link_libraries(mt-search-engine PRIVATE thread_pool_lib)
